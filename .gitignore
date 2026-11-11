@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 node_modules/
 .next/
+**/tsconfig.tsbuildinfo
 data/
 .vefaas/
 .DS_Store

@@ -1,0 +1,92 @@
+verify.sh 自检  2026-11-11 12:06:44  产品：我的第一个产品（/Users/guo/Documents/通用项目/aigc-zhong-tai/projects/我的第一个产品）
+
+================ 1. mock 自动化测试 ================
+
+ RUN  v5.1.0 /Users/guo/Documents/通用项目/aigc-zhong-tai/projects/我的第一个产品/frontend
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  12:06:45
+   Duration  85ms (import 60%, transform 21%, tests 11%, worker 8%)
+
+结果：N/A（无代码阶段）；前端测试通过
+
+================ 2. 真实模型冒烟记录（docs/evidence/<阶段>/冒烟记录.md，须由冒烟脚本写入，格式见通用手册第十节） ================
+结果：N/A（无代码阶段）
+
+================ 3. 密钥排除（扫描整个仓库会进 git 的文件，以及本产品的构建产物） ================
+通过：没有 .env 文件被 git 跟踪。
+通过：会进仓库的文件中未发现密钥样式字符串。
+通过：构建产物 projects/我的第一个产品/frontend/.next 未发现密钥样式字符串。
+通过：projects/我的第一个产品/backend/.env 中 SENSENOVA_API_KEY 的值未出现在任何跟踪文件或构建产物中。
+结果：通过
+
+================ 4. 数据重启恢复（verify.sh 自己起服务、写随机标记、杀进程、再起、读回；钩子 scripts/restart-check.sh 只提供 start/write/read/stop） ================
+结果：N/A（无代码阶段）
+
+================ 5. 前端类型检查 / Lint / 生产构建 ================
+
+> lint
+> eslint .
+
+
+/Users/guo/Documents/通用项目/aigc-zhong-tai/projects/我的第一个产品/frontend/app/category/[kind]/page.tsx
+  92:389  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  97:246  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  97:296  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/Users/guo/Documents/通用项目/aigc-zhong-tai/projects/我的第一个产品/frontend/app/page.tsx
+  34:80  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/Users/guo/Documents/通用项目/aigc-zhong-tai/projects/我的第一个产品/frontend/eslint.config.mjs
+  4:1  warning  Assign array to a variable before exporting as module default  import/no-anonymous-default-export
+
+/Users/guo/Documents/通用项目/aigc-zhong-tai/projects/我的第一个产品/frontend/postcss.config.mjs
+  1:1  warning  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+✖ 6 problems (0 errors, 6 warnings)
+
+
+> build
+> next build
+
+▲ Next.js 16.4.5 (Turbopack)
+✓ Running next.config.ts took 58ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 273ms
+  Running TypeScript ...
+  Finished TypeScript in 746ms ...
+  Collecting page data using 5 workers ...
+  Generating static pages using 5 workers (0/3) ...
+✓ Generating static pages using 5 workers (3/3) in 205ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+└ ƒ /category/[kind]
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+结果：通过
+
+================ 6. 文件齐全与位置（AGENTS.md 第 7 节的产出清单；根目录不放产品文件；前面阶段有没有被跳过） ================
+通过：根目录没有放错位置的文件。
+有：docs/阶段文档/技术适配声明.md
+有：docs/evidence/阶段1/是否表.md
+有：docs/项目状态.md
+通过：前面阶段（阶段0）的产物都在。
+结果：通过
+
+================ 汇总（抄进是否表的就是这六行） ================
+是否表第 2 项  mock 测试：      N/A（无代码阶段）；前端测试通过
+是否表第 3 项  真实模型冒烟：   N/A（无代码阶段）
+是否表第 4 项  前端检查与构建： 通过
+是否表第 5 项  密钥排除：       通过
+是否表第 6 项  重启后数据恢复： N/A（无代码阶段）
+是否表第 10 项 文件齐全与位置： 通过
+总判定：六项全部通过或不适用。
