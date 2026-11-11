@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 class MockProvider:
     name = "mock"
 
-    def generate(self, output_path: Path, width: int, height: int, label: str) -> None:
+    def generate(self, output_path: Path, width: int, height: int, label: str, prompt: str | None = None) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         image = Image.new("RGB", (width, height), (238, 244, 255))
         draw = ImageDraw.Draw(image)

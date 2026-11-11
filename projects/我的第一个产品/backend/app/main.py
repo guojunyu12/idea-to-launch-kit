@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -27,6 +27,7 @@ from app.core.errors import (
 )
 from app.db import (
     AuditEvent,
+    GenerationRecord,
     LoginChallengeRecord,
     ModelConfigRecord,
     SessionRecord,
@@ -44,6 +45,11 @@ from app.schemas import (
     CreateTaskIn,
     EmailCodeRequest,
     EmailCodeVerify,
+    GenerationCreateIn,
+    GenerationListOut,
+    GenerationOut,
+    ModelListOut,
+    ModelOut,
     RegenerateTaskIn,
     TaskOut,
     TemplateImportIn,
@@ -118,6 +124,41 @@ def _template_payload(row: TemplateRecord, *, legacy_kind: bool = False) -> dict
     }
 
 
+def _model_payload(row: ModelConfigRecord) -> dict:
+    return {
+        "model_id": row.model_id,
+        "name": row.name,
+        "provider": row.provider,
+        "enabled": row.enabled,
+        "is_default": row.is_default,
+        "module_bindings": json.loads(row.module_bindings_json or "[]"),
+        "supported_ratios": json.loads(row.supported_ratios_json or "[]"),
+        "points_per_success": row.points_per_success,
+    }
+
+
+def _generation_payload(row: GenerationRecord) -> dict:
+    return {
+        "generation_id": row.id,
+        "template_id": row.template_id,
+        "module_kind": row.module_kind,
+        "status": row.status,
+        "prompt": row.prompt_snapshot,
+        "model_id": row.model_id,
+        "provider": row.provider,
+        "aspect_ratio": row.aspect_ratio,
+        "output_width": row.output_width,
+        "output_height": row.output_height,
+        "asset_url": f"/api/v1/generations/{row.id}/asset" if row.status == "succeeded" and row.asset_path else None,
+        "elapsed_ms": row.elapsed_ms,
+        "cost_cents": row.cost_cents,
+        "points_charged": row.points_charged,
+        "free_quota_used": row.free_quota_used,
+        "charge_status": row.charge_status,
+        "error_code": row.error_code,
+    }
+
+
 def _seed_legacy_templates(session_factory, library_path: Path) -> None:
     """Import the legacy JSON catalog once so V7 can enforce publish state in the DB."""
     try:
@@ -168,6 +209,41 @@ def _seed_legacy_templates(session_factory, library_path: Path) -> None:
         session.close()
 
 
+def _seed_default_model(session_factory, settings: Settings) -> None:
+    session = session_factory()
+    try:
+        if settings.provider_mode == "qwen":
+            model_id, name, provider = settings.qwen_model, "千问图片生成", "qwen"
+        elif settings.provider_mode == "sensenova":
+            model_id, name, provider = settings.sensenova_model, "商汤图片生成", "sensenova"
+        else:
+            model_id, name, provider = "mock", "开发测试模型", "mock"
+        row = session.scalar(select(ModelConfigRecord).where(ModelConfigRecord.model_id == model_id))
+        if row is None:
+            row = ModelConfigRecord(
+                name=name,
+                provider=provider,
+                model_id=model_id,
+                model_type="image_generation",
+                enabled=True,
+                priority=1,
+                module_bindings_json=json.dumps(["sticker", "mobile_wallpaper", "desktop_wallpaper"]),
+                supported_ratios_json=json.dumps(list(ASPECT_RATIO_SIZES)),
+                points_per_success=1,
+                cost_cents_per_call=0,
+            )
+            session.add(row)
+        for existing in session.scalars(select(ModelConfigRecord)):
+            existing.is_default = existing.model_id == model_id
+            if existing.model_id != model_id and existing.provider in {"mock", "qwen", "sensenova"}:
+                existing.enabled = False
+        row.enabled = True
+        row.is_default = True
+        session.commit()
+    finally:
+        session.close()
+
+
 def create_app(
     database_url: str | None = None,
     storage_root: str | Path | None = None,
@@ -177,6 +253,7 @@ def create_app(
     settings.storage_root.mkdir(parents=True, exist_ok=True)
     session_factory = create_session_factory(settings.database_url)
     _seed_legacy_templates(session_factory, settings.template_library_path)
+    _seed_default_model(session_factory, settings)
     if settings.provider_mode == "qwen":
         provider = QwenImageProvider(
             api_key=settings.qwen_api_key,
@@ -368,6 +445,107 @@ def create_app(
             query = query.where(TemplateRecord.module_kind == module_filter)
         rows = list(session.scalars(query.order_by(TemplateRecord.created_at)))
         return {"items": [TemplateOut.model_validate(_template_payload(row, legacy_kind=kind == "wallpaper")) for row in rows]}
+
+    @app.get("/api/v1/models", response_model=ModelListOut)
+    def models(module: str | None = Query(default=None), session: Session = Depends(db)):
+        rows = list(session.scalars(select(ModelConfigRecord).where(ModelConfigRecord.enabled.is_(True)).order_by(ModelConfigRecord.priority, ModelConfigRecord.created_at)))
+        if module:
+            rows = [row for row in rows if not json.loads(row.module_bindings_json or "[]") or module in json.loads(row.module_bindings_json or "[]")]
+        return {"items": [ModelOut.model_validate(_model_payload(row)) for row in rows]}
+
+    @app.post("/api/v1/generations", response_model=GenerationOut, status_code=201)
+    def create_generation(payload: GenerationCreateIn, user: UserRecord = Depends(current_user), session: Session = Depends(db)):
+        if payload.idempotency_key:
+            existing = session.scalar(select(GenerationRecord).where(GenerationRecord.user_id == user.id, GenerationRecord.idempotency_key == payload.idempotency_key))
+            if existing is not None:
+                return _generation_payload(existing)
+        template = session.scalar(select(TemplateRecord).where(TemplateRecord.id == payload.template_id, TemplateRecord.status == "published"))
+        if template is None:
+            raise AppError("TEMPLATE_NOT_FOUND", "模板不存在或尚未发布", 404)
+        model_query = select(ModelConfigRecord).where(ModelConfigRecord.enabled.is_(True))
+        if payload.model_id:
+            model_query = model_query.where(ModelConfigRecord.model_id == payload.model_id)
+        else:
+            model_query = model_query.where(ModelConfigRecord.is_default.is_(True))
+        model = session.scalar(model_query.order_by(ModelConfigRecord.priority))
+        if model is None:
+            raise AppError("MODEL_UNAVAILABLE", "当前没有可用的生图模型", 503)
+        bindings = json.loads(model.module_bindings_json or "[]")
+        if bindings and template.module_kind not in bindings:
+            raise AppError("MODEL_MODULE_UNSUPPORTED", "该模型未绑定当前模块", 400)
+        width, height, aspect_ratio = _resolve_generation_dimensions(template, payload)
+        today = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        free_count = session.scalar(select(func.count(GenerationRecord.id)).where(GenerationRecord.user_id == user.id, GenerationRecord.status == "succeeded", GenerationRecord.free_quota_used.is_(True), GenerationRecord.created_at >= today)) or 0
+        free_quota_used = free_count < 3
+        points = model.points_per_success
+        if not free_quota_used and user.points_balance < points:
+            raise AppError("QUOTA_EXCEEDED", "今日免费额度已用完，当前积分不足", 402)
+        if not free_quota_used:
+            user.points_balance -= points
+        prompt = _compose_prompt(template, payload.prompt)
+        row = GenerationRecord(
+            user_id=user.id,
+            template_id=template.id,
+            template_version_no=template.version_no,
+            module_kind=template.module_kind,
+            prompt_snapshot=prompt,
+            aspect_ratio=aspect_ratio,
+            output_width=width,
+            output_height=height,
+            model_id=model.model_id,
+            provider=provider.name,
+            status="running",
+            points_charged=0 if free_quota_used else points,
+            free_quota_used=free_quota_used,
+            charge_status="reserved",
+            idempotency_key=payload.idempotency_key,
+        )
+        session.add(row)
+        session.flush()
+        session.commit()
+        started = time.monotonic()
+        try:
+            asset_path = settings.storage_root / "generations" / f"{row.id}.png"
+            provider.generate(asset_path, width, height, template.title, prompt=prompt)
+            row.status = "succeeded"
+            row.asset_path = str(asset_path)
+            row.elapsed_ms = round((time.monotonic() - started) * 1000)
+            row.charge_status = "charged"
+            row.cost_cents = model.cost_cents_per_call
+            row.updated_at = _utcnow()
+            session.add(AuditEvent(owner_id=user.id, actor_user_id=user.id, actor_role=user.role, entity_type="generation", entity_id=row.id, action="generation", result="succeeded", metadata_json=json.dumps({"template_id": row.template_id, "model_id": row.model_id, "aspect_ratio": row.aspect_ratio, "output_width": width, "output_height": height, "elapsed_ms": row.elapsed_ms, "cost_cents": row.cost_cents}, ensure_ascii=False)))
+            session.commit()
+        except Exception as exc:
+            if not free_quota_used:
+                user.points_balance += points
+            row.status = "failed"
+            row.error_code = "GENERATION_FAILED"
+            row.charge_status = "refunded"
+            row.elapsed_ms = round((time.monotonic() - started) * 1000)
+            row.updated_at = _utcnow()
+            session.add(AuditEvent(owner_id=user.id, actor_user_id=user.id, actor_role=user.role, entity_type="generation", entity_id=row.id, action="generation", result="failed", metadata_json=json.dumps({"error": type(exc).__name__}, ensure_ascii=False)))
+            session.commit()
+            raise AppError("GENERATION_FAILED", "生成失败，额度已返还，请稍后重试", 502) from exc
+        return _generation_payload(row)
+
+    @app.get("/api/v1/generations", response_model=GenerationListOut)
+    def list_generations(user: UserRecord = Depends(current_user), session: Session = Depends(db)):
+        rows = list(session.scalars(select(GenerationRecord).where(GenerationRecord.user_id == user.id).order_by(GenerationRecord.created_at.desc()).limit(50)))
+        return {"items": [_generation_payload(row) for row in rows]}
+
+    @app.get("/api/v1/generations/{generation_id}", response_model=GenerationOut)
+    def get_generation(generation_id: str, user: UserRecord = Depends(current_user), session: Session = Depends(db)):
+        row = session.scalar(select(GenerationRecord).where(GenerationRecord.id == generation_id, GenerationRecord.user_id == user.id))
+        if row is None:
+            raise AppError("NOT_FOUND", "生成任务不存在", 404)
+        return _generation_payload(row)
+
+    @app.get("/api/v1/generations/{generation_id}/asset")
+    def get_generation_asset(generation_id: str, user: UserRecord = Depends(current_user), session: Session = Depends(db)):
+        row = session.scalar(select(GenerationRecord).where(GenerationRecord.id == generation_id, GenerationRecord.user_id == user.id))
+        if row is None or row.status != "succeeded" or not row.asset_path or not Path(row.asset_path).is_file():
+            raise AppError("NOT_FOUND", "生成结果不存在", 404)
+        return FileResponse(row.asset_path, media_type="image/png", filename=f"{generation_id}.png")
 
     @app.get("/api/v1/admin/templates")
     def admin_templates(user: UserRecord = Depends(require_operator), session: Session = Depends(db)):
@@ -627,6 +805,31 @@ def _generate_version(session: Session, task: TaskRecord, template: dict, provid
 def _ratio_for_dimensions(width: int, height: int) -> str:
     ratio = width / height
     return min(ASPECT_RATIO_SIZES, key=lambda value: abs(ASPECT_RATIO_SIZES[value][0] / ASPECT_RATIO_SIZES[value][1] - ratio))
+
+
+def _compose_prompt(template: TemplateRecord, user_prompt: str) -> str:
+    base = (template.default_prompt or template.title).strip()
+    extra = user_prompt.strip()
+    return f"{base}\n用户要求：{extra}" if extra else base
+
+
+def _resolve_generation_dimensions(template: TemplateRecord, payload: GenerationCreateIn) -> tuple[int, int, str]:
+    if (payload.width is None) != (payload.height is None):
+        raise AppError("INVALID_SIZE", "自定义尺寸必须同时填写宽和高", 400)
+    if payload.width is not None and payload.height is not None:
+        ratio_value = payload.width / payload.height
+        if not 0.25 <= ratio_value <= 4.0:
+            raise AppError("INVALID_SIZE", "尺寸比例必须在 0.25 到 4.0 之间", 400)
+        return payload.width, payload.height, f"{payload.width}:{payload.height}"
+    ratio = payload.aspect_ratio or template.default_aspect_ratio or _ratio_for_dimensions(template.target_width, template.target_height)
+    if ratio not in ASPECT_RATIO_SIZES:
+        raise AppError("INVALID_ASPECT_RATIO", "输出比例不在支持范围内", 400)
+    if ratio == template.default_aspect_ratio:
+        return template.target_width, template.target_height, ratio
+    if template.module_kind == "sticker" and ratio == "1:1":
+        return 512, 512, ratio
+    width, height = ASPECT_RATIO_SIZES[ratio]
+    return width, height, ratio
 
 
 def _resolve_output_size(template: dict, aspect_ratio: str) -> tuple[int, int]:

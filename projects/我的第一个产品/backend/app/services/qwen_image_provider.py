@@ -22,11 +22,11 @@ class QwenImageProvider:
         self.max_retries = max(0, max_retries)
         self.retry_backoff_seconds = max(0.0, retry_backoff_seconds)
 
-    def generate(self, output_path: Path, width: int, height: int, label: str) -> None:
+    def generate(self, output_path: Path, width: int, height: int, label: str, prompt: str | None = None) -> None:
         request = {
             "model": self.model,
             "input": {
-                "messages": [{"role": "user", "content": [{"text": _prompt_for(label)}]}]
+                "messages": [{"role": "user", "content": [{"text": _prompt_for(label, prompt)}]}]
             },
             "parameters": {"size": _supported_size(width, height), "prompt_extend": False},
         }
@@ -86,5 +86,6 @@ def _supported_size(width: int, height: int) -> str:
     return min(options, key=lambda size: abs(options[size] - ratio))
 
 
-def _prompt_for(label: str) -> str:
-    return f"生成一张{label}，构图完整，主体清晰，色彩协调，不出现水印、乱码或多余边框，画面干净。"
+def _prompt_for(label: str, prompt: str | None = None) -> str:
+    extra = f"用户要求：{prompt.strip()}。" if prompt and prompt.strip() else ""
+    return f"生成一张{label}，{extra}构图完整，主体清晰，色彩协调，不出现水印、乱码或多余边框，画面干净。"

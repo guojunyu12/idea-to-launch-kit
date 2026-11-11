@@ -18,6 +18,74 @@ OWNER = "real-smoke-owner"
 MODEL = os.getenv("SENSENOVA_MODEL", "未配置")
 
 
+def v7_generation_smoke() -> None:
+    started = datetime.now(timezone.utc).astimezone()
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    email = "stage2-2-smoke@example.com"
+    with httpx.Client(base_url=BASE_URL, timeout=300) as client:
+        health = client.get("/healthz")
+        health.raise_for_status()
+        challenge = client.post("/api/v1/auth/request-code", json={"email": email})
+        challenge.raise_for_status()
+        login = client.post("/api/v1/auth/verify-code", json={"challenge_id": challenge.json()["challenge_id"], "email": email, "code": "000000"})
+        login.raise_for_status()
+        templates = client.get("/api/v1/templates", params={"module": "sticker"})
+        templates.raise_for_status()
+        template = templates.json()["items"][0]
+        models = client.get("/api/v1/models")
+        models.raise_for_status()
+        model = models.json()["items"][0]
+        started_call = datetime.now(timezone.utc).astimezone()
+        generation = client.post(
+            "/api/v1/generations",
+            json={
+                "template_id": template["template_id"],
+                "prompt": "一个开心的黄色小太阳，简洁可爱的贴纸风格",
+                "width": 512,
+                "height": 512,
+                "model_id": model["model_id"],
+                "idempotency_key": f"smoke-{started_call.strftime('%Y%m%d%H%M%S')}",
+            },
+        )
+        generation.raise_for_status()
+        payload = generation.json()
+        if payload.get("status") != "succeeded":
+            raise RuntimeError(f"V7 生成未成功：{payload}")
+        asset = client.get(payload["asset_url"])
+        asset.raise_for_status()
+        output_path = EVIDENCE / "真实模型结果.png"
+        output_path.write_bytes(asset.content)
+        with Image.open(output_path) as image:
+            width, height = image.size
+        other = httpx.Client(base_url=BASE_URL, timeout=30)
+        try:
+            other_challenge = other.post("/api/v1/auth/request-code", json={"email": "stage2-2-other@example.com"}).json()
+            other.post("/api/v1/auth/verify-code", json={"challenge_id": other_challenge["challenge_id"], "email": "stage2-2-other@example.com", "code": "000000"}).raise_for_status()
+            isolated = other.get(f"/api/v1/generations/{payload['generation_id']}")
+            if isolated.status_code != 404:
+                raise RuntimeError(f"归属隔离失败：HTTP {isolated.status_code}")
+        finally:
+            other.close()
+    provider = "阿里云百炼 DashScope" if model["provider"] == "qwen" else model["provider"]
+    record = f"""# 阶段2-2真实模型冒烟记录
+
+- 模型：{model['model_id']}
+- 供应商：{provider}
+- 接口：`POST /api/v1/generations` → 后端模型适配层
+- 说明：验证已登录用户从已发布模板、文本提示词和自定义尺寸完成真实生图、下载和用户归属隔离；不记录完整提示词和密钥。
+
+| 时间 | 检查 | 结果 |
+| {started.strftime('%Y-%m-%d %H:%M:%S')} | `/healthz` | 200，服务可用 |
+| {started_call.strftime('%Y-%m-%d %H:%M:%S')} | 真实生成 | 201，`status=succeeded`，模型 `{model['model_id']}`，耗时 `{payload.get('elapsed_ms')}` ms |
+| {started_call.strftime('%Y-%m-%d %H:%M:%S')} | 下载结果 | 200，PNG，{width}×{height}，{len(asset.content)} bytes |
+| {started_call.strftime('%Y-%m-%d %H:%M:%S')} | 换用户读取 | 404，`NOT_FOUND` |
+
+任务 ID：`{payload['generation_id']}`
+"""
+    (EVIDENCE / "冒烟记录.md").write_text(record, encoding="utf-8")
+    print(json.dumps({"model": model["model_id"], "status": payload["status"], "generation_id": payload["generation_id"], "size": [width, height]}, ensure_ascii=False))
+
+
 def foundation_smoke() -> None:
     started = datetime.now(timezone.utc).astimezone()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
@@ -96,6 +164,9 @@ def foundation_smoke() -> None:
 def main() -> None:
     if STAGE == "阶段2-1":
         foundation_smoke()
+        return
+    if STAGE == "阶段2-2":
+        v7_generation_smoke()
         return
     started = datetime.now(timezone.utc).astimezone()
     EVIDENCE.mkdir(parents=True, exist_ok=True)

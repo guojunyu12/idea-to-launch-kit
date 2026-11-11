@@ -20,9 +20,37 @@ class UserRecord(Base):
     email_normalized: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     role: Mapped[str] = mapped_column(String(30), default="user")
     status: Mapped[str] = mapped_column(String(30), default="active")
+    points_balance: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GenerationRecord(Base):
+    __tablename__ = "generations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    template_id: Mapped[str] = mapped_column(String(120), index=True)
+    template_version_no: Mapped[int] = mapped_column(Integer, default=1)
+    module_kind: Mapped[str] = mapped_column(String(40), index=True)
+    prompt_snapshot: Mapped[str] = mapped_column(Text, default="")
+    aspect_ratio: Mapped[str] = mapped_column(String(20))
+    output_width: Mapped[int] = mapped_column(Integer)
+    output_height: Mapped[int] = mapped_column(Integer)
+    model_id: Mapped[str] = mapped_column(String(160))
+    provider: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    asset_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points_charged: Mapped[int] = mapped_column(Integer, default=0)
+    free_quota_used: Mapped[bool] = mapped_column(default=False)
+    charge_status: Mapped[str] = mapped_column(String(30), default="reserved")
+    idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class LoginChallengeRecord(Base):
@@ -212,6 +240,9 @@ def _migrate_sqlite(engine, database_url: str) -> None:
         "output_height": "INTEGER",
     }
     with engine.begin() as connection:
+        user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
+        if "points_balance" not in user_columns:
+            connection.exec_driver_sql("ALTER TABLE users ADD COLUMN points_balance INTEGER NOT NULL DEFAULT 0")
         for name, definition in additions.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")

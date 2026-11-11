@@ -86,9 +86,19 @@
     .admin-fields { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
     .admin-fields input { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--paper); }
     .public-list { margin-top: 12px; color: var(--muted); font-size: 12px; }
+    .generation-flow { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .generation-fields { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 12px; align-items: end; }
+    .generation-fields textarea { min-height: 86px; resize: vertical; }
+    .generation-fields select, .generation-fields textarea, .custom-size input { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--paper); color: var(--ink); font: inherit; }
+    .custom-size { display: flex; gap: 8px; }
+    .custom-size input { min-width: 0; }
+    .generation-result { display: grid; grid-template-columns: 180px 1fr; gap: 14px; align-items: start; margin-top: 16px; }
+    .generation-result img { width: 180px; height: 180px; object-fit: cover; border-radius: 12px; background: #ececf3; }
+    .generation-result p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
     [hidden] { display: none !important; }
     @media (prefers-reduced-motion: reduce) { .primary { transition: none; } .primary:hover { transform: none; } }
     @media (max-width: 1060px) { .layout { grid-template-columns: minmax(240px, 280px) minmax(360px, 1fr); } .runlog { grid-column: 1 / -1; min-height: 0; } .steps { grid-template-columns: repeat(3, 1fr); margin-bottom: 0; } .meta { margin-top: 22px; } .verify-grid { grid-template-columns: 1fr; } .admin-fields { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 700px) { .generation-fields { grid-template-columns: 1fr; } .generation-result { grid-template-columns: 1fr; } .generation-result img { width: 100%; height: 220px; } }
     @media (max-width: 700px) { .shell { padding-top: 15px; } .topbar { align-items: flex-start; } .mode { font-size: 11px; } .intro { display: block; padding: 38px 0 24px; } .intro p { margin-top: 18px; } .layout { display: block; } .stage { min-height: 500px; margin: 16px 0; } .controls, .runlog { padding: 18px; } .steps { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -140,6 +150,18 @@
         </div>
       </details>
       <pre class="verify-log" id="verify-log">点击上面的按钮开始验收。</pre>
+      <div class="generation-flow">
+        <div class="panel-title"><h2>V7 用户生成闭环</h2><span>模板 + 提示词 + 尺寸 + 模型</span></div>
+        <div class="generation-fields">
+          <div class="field"><label for="v7-template">已发布模板</label><select id="v7-template"><option>正在读取…</option></select></div>
+          <div class="field"><label for="v7-ratio">输出比例</label><select id="v7-ratio"><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:2">3:2</option><option value="16:9">16:9</option><option value="3:4">3:4</option><option value="2:3">2:3</option><option value="4:5">4:5</option><option value="9:16">9:16</option><option value="9:19.5">9:19.5</option><option value="9:21">9:21</option><option value="custom">自定义尺寸</option></select></div>
+          <div class="field"><label for="v7-model">生图模型</label><select id="v7-model"><option>正在读取…</option></select></div>
+          <div class="field" style="grid-column: 1 / -1"><label for="v7-prompt">你想生成什么</label><textarea id="v7-prompt" placeholder="例如：暖色天空、细腻云朵、清晨氛围，画面干净"></textarea></div>
+          <div class="field custom-size" id="custom-size" hidden><input id="v7-width" type="number" min="256" max="4096" placeholder="宽 256–4096"><input id="v7-height" type="number" min="256" max="4096" placeholder="高 256–4096"></div>
+        </div>
+        <div class="verify-actions"><button class="primary" id="v7-generate" type="button">生成图片</button><button class="secondary" id="v7-refresh" type="button">刷新模板和模型</button></div>
+        <div class="generation-result"><img id="v7-result" alt="V7 生成结果" hidden><p id="v7-status">登录后选择模板并点击“生成图片”。成功后会在这里显示结果、尺寸和额度状态。</p></div>
+      </div>
     </section>
     <main class="layout">
       <section class="panel controls">
@@ -236,6 +258,34 @@
     async function publishTemplate() {
       try { const payload = await verifyRequest(`/api/v1/admin/templates/${encodeURIComponent($("admin-template-id").value)}/publish`, { method: "POST" }); logVerify(`模板发布完成：${payload.status}`); refreshPublic(); } catch (err) { logVerify(`发布失败：${err.message}`); }
     }
+    async function loadV7Options() {
+      try {
+        const [templates, models] = await Promise.all([verifyRequest("/api/v1/templates"), verifyRequest("/api/v1/models")]);
+        const templateSelect = $("v7-template");
+        templateSelect.innerHTML = templates.items.map((item) => `<option value="${item.template_id}" data-ratio="${item.default_aspect_ratio || "1:1"}">${item.name} · ${item.module_kind || item.kind}</option>`).join("");
+        if (templateSelect.options[0]) $("v7-ratio").value = templateSelect.options[0].dataset.ratio || "1:1";
+        $("v7-model").innerHTML = models.items.map((item) => `<option value="${item.model_id}">${item.name} · ${item.model_id}</option>`).join("");
+        logVerify(`V7 生成选项已加载：${templates.items.length} 个模板，${models.items.length} 个模型。`);
+      } catch (err) { $("v7-status").textContent = `选项加载失败：${err.message}`; logVerify(`V7 选项加载失败：${err.message}`); }
+    }
+    async function generateV7() {
+      const button = $("v7-generate");
+      const ratio = $("v7-ratio").value;
+      const payload = { template_id: $("v7-template").value, prompt: $("v7-prompt").value, model_id: $("v7-model").value, idempotency_key: crypto.randomUUID() };
+      if (ratio === "custom") { payload.width = Number($("v7-width").value); payload.height = Number($("v7-height").value); } else payload.aspect_ratio = ratio;
+      button.disabled = true; button.textContent = "生成中…"; $("v7-status").textContent = "正在调用模型，结果完成后会自动显示。";
+      try {
+        const result = await verifyRequest("/api/v1/generations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const image = $("v7-result"); image.src = `${result.asset_url}?t=${Date.now()}`; image.hidden = false;
+        $("v7-status").textContent = `生成成功：${result.output_width} × ${result.output_height}，模型 ${result.model_id}，${result.free_quota_used ? "使用今日免费额度" : `扣除 ${result.points_charged} 积分`}。`;
+        logVerify(`V7 生成成功：${result.generation_id}`);
+      } catch (err) { $("v7-status").textContent = `生成失败：${err.message}`; logVerify(`V7 生成失败：${err.message}`); }
+      finally { button.disabled = false; button.textContent = "生成图片"; }
+    }
+    $("v7-ratio").addEventListener("change", () => { $("custom-size").hidden = $("v7-ratio").value !== "custom"; });
+    $("v7-template").addEventListener("change", () => { const option = $("v7-template").options[$("v7-template").selectedIndex]; if (option?.dataset.ratio) $("v7-ratio").value = option.dataset.ratio; $("custom-size").hidden = $("v7-ratio").value !== "custom"; });
+    $("v7-generate").addEventListener("click", generateV7);
+    $("v7-refresh").addEventListener("click", loadV7Options);
     $("request-code").addEventListener("click", requestCode);
     $("verify-code-btn").addEventListener("click", verifyLogin);
     $("logout-btn").addEventListener("click", logout);
@@ -290,6 +340,7 @@
       finally { submit.disabled = false; submit.textContent = "开始生成"; }
     });
     loadTemplates();
+    loadV7Options();
   </script>
 </body>
 </html>

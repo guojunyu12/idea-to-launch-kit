@@ -61,6 +61,55 @@ class TemplateListOut(BaseModel):
     items: list[TemplateOut]
 
 
+class ModelOut(BaseModel):
+    model_id: str
+    name: str
+    provider: str
+    enabled: bool
+    is_default: bool
+    module_bindings: list[str] = []
+    supported_ratios: list[str] = []
+    points_per_success: int
+
+
+class ModelListOut(BaseModel):
+    items: list[ModelOut]
+
+
+class GenerationCreateIn(BaseModel):
+    template_id: str = Field(min_length=1, max_length=120)
+    prompt: str = Field(default="", max_length=4096)
+    aspect_ratio: str | None = Field(default=None, max_length=20)
+    width: int | None = Field(default=None, ge=256, le=4096)
+    height: int | None = Field(default=None, ge=256, le=4096)
+    model_id: str | None = Field(default=None, max_length=160)
+    idempotency_key: str | None = Field(default=None, max_length=120)
+
+
+class GenerationOut(BaseModel):
+    generation_id: str
+    template_id: str
+    module_kind: str
+    status: str
+    prompt: str
+    model_id: str
+    provider: str
+    aspect_ratio: str
+    output_width: int
+    output_height: int
+    asset_url: str | None = None
+    elapsed_ms: int | None = None
+    cost_cents: int | None = None
+    points_charged: int = 0
+    free_quota_used: bool = False
+    charge_status: str
+    error_code: str | None = None
+
+
+class GenerationListOut(BaseModel):
+    items: list[GenerationOut]
+
+
 class UploadOut(BaseModel):
     upload_id: str
     owner_id: str

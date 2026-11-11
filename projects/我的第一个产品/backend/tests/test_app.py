@@ -13,6 +13,16 @@ def image_bytes(fmt: str = "PNG") -> bytes:
     return buf.getvalue()
 
 
+def login(client, email: str = "v7-user@example.com"):
+    challenge = client.post("/api/v1/auth/request-code", json={"email": email}).json()
+    response = client.post(
+        "/api/v1/auth/verify-code",
+        json={"challenge_id": challenge["challenge_id"], "email": email, "code": "000000"},
+    )
+    assert response.status_code == 200
+    return response.json()["user"]
+
+
 @pytest.fixture()
 def client(tmp_path):
     app = create_app(
@@ -42,6 +52,41 @@ def test_templates_can_be_filtered_by_kind(client):
     payload = response.json()
     assert payload["items"]
     assert all(item["kind"] == "wallpaper" for item in payload["items"])
+
+
+def test_v7_generation_requires_login_and_lists_models(client):
+    assert client.get("/api/v1/models").status_code == 200
+    response = client.post("/api/v1/generations", json={"template_id": "sticker-laugh", "prompt": "开心"})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "AUTH_REQUIRED"
+
+
+def test_v7_generation_uses_prompt_size_and_returns_owner_scoped_asset(client):
+    login(client)
+    response = client.post(
+        "/api/v1/generations",
+        json={"template_id": "sticker-laugh", "prompt": "蓝色背景和夸张笑脸", "width": 640, "height": 640, "idempotency_key": "v7-1"},
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "succeeded"
+    assert payload["output_width"] == 640
+    assert payload["output_height"] == 640
+    assert "蓝色背景" in payload["prompt"]
+    assert payload["free_quota_used"] is True
+    assert client.get(payload["asset_url"]).status_code == 200
+    login(client, "another-v7-user@example.com")
+    assert client.get(f"/api/v1/generations/{payload['generation_id']}").status_code == 404
+
+
+def test_v7_generation_idempotency_does_not_call_twice(client):
+    login(client, "idempotent@example.com")
+    body = {"template_id": "sticker-laugh", "prompt": "同一个任务", "idempotency_key": "same-request"}
+    first = client.post("/api/v1/generations", json=body)
+    second = client.post("/api/v1/generations", json=body)
+    assert first.status_code == second.status_code == 201
+    assert first.json()["generation_id"] == second.json()["generation_id"]
+    assert len(client.get("/api/v1/generations").json()["items"]) == 1
 
 
 def test_upload_rejects_non_image_content_with_uniform_error(client):
