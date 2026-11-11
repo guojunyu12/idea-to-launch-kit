@@ -72,9 +72,23 @@
     .meta-row span:first-child { color: var(--muted); }
     .meta-row span:last-child { max-width: 145px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
     .error { margin-top: 14px; padding: 11px 12px; border-radius: 10px; background: #fff0ee; color: #a33d34; font-size: 12px; line-height: 1.45; }
+    .verify-panel { margin-bottom: 16px; padding: 22px; }
+    .verify-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .verify-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .verify-actions button { width: auto; padding: 10px 14px; }
+    .secondary { border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); font-weight: 700; cursor: pointer; }
+    .secondary:hover { border-color: var(--violet); }
+    .verify-status { display: grid; gap: 8px; align-content: start; padding: 14px; border-radius: 12px; background: var(--paper); color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .verify-status strong { color: var(--ink); }
+    .verify-log { min-height: 88px; margin: 16px 0 0; padding: 12px; overflow: auto; border-radius: 10px; background: #171625; color: #d9f59c; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    .admin-flow { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .admin-flow summary { cursor: pointer; color: var(--ink); font-weight: 800; }
+    .admin-fields { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+    .admin-fields input { min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--paper); }
+    .public-list { margin-top: 12px; color: var(--muted); font-size: 12px; }
     [hidden] { display: none !important; }
     @media (prefers-reduced-motion: reduce) { .primary { transition: none; } .primary:hover { transform: none; } }
-    @media (max-width: 1060px) { .layout { grid-template-columns: minmax(240px, 280px) minmax(360px, 1fr); } .runlog { grid-column: 1 / -1; min-height: 0; } .steps { grid-template-columns: repeat(3, 1fr); margin-bottom: 0; } .meta { margin-top: 22px; } }
+    @media (max-width: 1060px) { .layout { grid-template-columns: minmax(240px, 280px) minmax(360px, 1fr); } .runlog { grid-column: 1 / -1; min-height: 0; } .steps { grid-template-columns: repeat(3, 1fr); margin-bottom: 0; } .meta { margin-top: 22px; } .verify-grid { grid-template-columns: 1fr; } .admin-fields { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 700px) { .shell { padding-top: 15px; } .topbar { align-items: flex-start; } .mode { font-size: 11px; } .intro { display: block; padding: 38px 0 24px; } .intro p { margin-top: 18px; } .layout { display: block; } .stage { min-height: 500px; margin: 16px 0; } .controls, .runlog { padding: 18px; } .steps { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -82,11 +96,50 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand"><span class="mark">乐</span><span>图个乐<small>生成测试工作台</small></span></div>
-      <div class="mode"><i></i><span>本地服务 · 商汤模式</span></div>
+      <div class="mode"><i></i><span>本地服务 · V7 验收模式</span></div>
     </header>
     <section class="intro">
       <h1>把一张照片，<br><em>变成一张图。</em></h1>
       <p>这里用来验收真实生成链路。选模板、上传图片，等结果落到右侧舞台。</p>
+    </section>
+    <section class="panel verify-panel">
+      <div class="panel-title"><h2>V7 验收工作台</h2><span>不用填写 API</span></div>
+      <div class="verify-grid">
+        <div>
+          <div class="field"><label for="verify-email">邮箱</label><input id="verify-email" type="email" value="user@example.com" autocomplete="email"></div>
+          <div class="field"><label for="verify-code">开发测试码</label><input id="verify-code" type="text" value="000000" inputmode="numeric" autocomplete="one-time-code"></div>
+          <div class="verify-actions">
+            <button class="primary" id="request-code" type="button">1. 获取验证码</button>
+            <button class="secondary" id="verify-code-btn" type="button">2. 登录</button>
+            <button class="secondary" id="logout-btn" type="button">退出登录</button>
+          </div>
+        </div>
+        <div class="verify-status">
+          <div>当前身份：<strong id="verify-role">未登录</strong></div>
+          <div>邮箱：<strong id="verify-user">—</strong></div>
+          <div>说明：普通用户可验证权限隔离；运营/管理员邮箱需先写入本地白名单。</div>
+        </div>
+      </div>
+      <div class="verify-actions">
+        <button class="secondary" id="check-permission" type="button">测试普通用户后台权限</button>
+        <button class="secondary" id="refresh-public" type="button">刷新公开模板</button>
+      </div>
+      <div class="public-list" id="public-list">公开模板：等待读取</div>
+      <details class="admin-flow">
+        <summary>运营 / 管理员：点击验证模板审核发布</summary>
+        <div class="admin-fields">
+          <input id="admin-template-id" value="verify-desktop-template" placeholder="模板 ID">
+          <input id="admin-title" value="验收电脑壁纸" placeholder="标题">
+          <input id="admin-width" value="1920" type="number" placeholder="宽">
+          <input id="admin-height" value="1080" type="number" placeholder="高">
+        </div>
+        <div class="verify-actions">
+          <button class="secondary" id="import-template" type="button">导入候选</button>
+          <button class="secondary" id="review-template" type="button">审核通过</button>
+          <button class="secondary" id="publish-template" type="button">发布模板</button>
+        </div>
+      </details>
+      <pre class="verify-log" id="verify-log">点击上面的按钮开始验收。</pre>
     </section>
     <main class="layout">
       <section class="panel controls">
@@ -94,7 +147,7 @@
         <form id="generate-form">
           <div class="field"><label for="owner">测试用户</label><input id="owner" type="text" value="demo-owner" autocomplete="off"></div>
           <div class="field"><label for="template">选择模板</label><select id="template" required><option value="">正在读取模板…</option></select></div>
-          <div class="field"><label for="file">上传一张图片</label><label class="filebox" for="file"><strong id="file-name">选择 JPG、PNG 或 WebP</strong><span>单张不超过 10MB；当前商汤模式为文生图，图片用于验证上传与数据隔离</span><input id="file" type="file" accept="image/jpeg,image/png,image/webp" required></label></div>
+          <div class="field"><label for="file">上传一张图片</label><label class="filebox" for="file"><strong id="file-name">选择 JPG、PNG 或 WebP</strong><span>单张不超过 10MB；当前千问模式为文生图，图片用于验证上传与数据隔离</span><input id="file" type="file" accept="image/jpeg,image/png,image/webp" required></label></div>
           <button class="primary" id="submit" type="submit">开始生成</button>
           <p class="hint">成功后会显示模型、任务状态、输出尺寸和下载预览。</p>
           <div class="error" id="error" hidden></div>
@@ -132,6 +185,65 @@
     const error = $("error");
     let resultUrl = null;
     let startedAt = 0;
+    let challengeId = null;
+    const verifyLog = $("verify-log");
+
+    function logVerify(message) { verifyLog.textContent = `${new Date().toLocaleTimeString()}  ${message}\n` + verifyLog.textContent; }
+    async function verifyRequest(path, options = {}) {
+      return readJson(await fetch(path, { credentials: "same-origin", ...options }));
+    }
+    async function requestCode() {
+      try {
+        const payload = await verifyRequest("/api/v1/auth/request-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: $("verify-email").value }) });
+        challengeId = payload.challenge_id;
+        logVerify("验证码挑战已创建，请点击“登录”。开发默认测试码为 000000。");
+      } catch (err) { logVerify(`获取验证码失败：${err.message}`); }
+    }
+    async function verifyLogin() {
+      try {
+        if (!challengeId) throw new Error("先点击“获取验证码”。");
+        const payload = await verifyRequest("/api/v1/auth/verify-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ challenge_id: challengeId, email: $("verify-email").value, code: $("verify-code").value }) });
+        $("verify-role").textContent = payload.user.role;
+        $("verify-user").textContent = payload.user.email;
+        logVerify(`登录成功：${payload.user.role}`);
+      } catch (err) { logVerify(`登录失败：${err.message}`); }
+    }
+    async function logout() {
+      try { await verifyRequest("/api/v1/auth/logout", { method: "POST" }); $("verify-role").textContent = "未登录"; $("verify-user").textContent = "—"; logVerify("已退出登录"); } catch (err) { logVerify(`退出失败：${err.message}`); }
+    }
+    async function checkPermission() {
+      try {
+        const response = await fetch("/api/v1/admin/templates", { credentials: "same-origin" });
+        const payload = await response.json();
+        if (response.status === 403 && payload?.error?.code === "ROLE_FORBIDDEN") logVerify("权限验证通过：普通用户不能进入后台模板接口。");
+        else logVerify(`权限结果：HTTP ${response.status}`);
+      } catch (err) { logVerify(`权限验证失败：${err.message}`); }
+    }
+    async function refreshPublic() {
+      try {
+        const payload = await verifyRequest("/api/v1/templates");
+        $("public-list").textContent = `公开模板：${payload.items.map((item) => `${item.name}（${item.status || "published"}）`).join("、") || "暂无"}`;
+        logVerify(`公开模板读取成功：${payload.items.length} 个`);
+      } catch (err) { logVerify(`公开模板读取失败：${err.message}`); }
+    }
+    function adminTemplatePayload() { return { template_id: $("admin-template-id").value, title: $("admin-title").value, module_kind: "desktop_wallpaper", target_width: Number($("admin-width").value), target_height: Number($("admin-height").value), source_platform: "manual", source_url: "https://example.com/template", rights_status: "cleared" }; }
+    async function importTemplate() {
+      try { const payload = await verifyRequest("/api/v1/admin/templates/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(adminTemplatePayload()) }); logVerify(`候选模板已导入：${payload.status}`); } catch (err) { logVerify(`导入失败：${err.message}`); }
+    }
+    async function reviewTemplate() {
+      try { const payload = await verifyRequest(`/api/v1/admin/templates/${encodeURIComponent($("admin-template-id").value)}/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve", reason: "验收来源和版权已核对" }) }); logVerify(`模板审核完成：${payload.status}`); } catch (err) { logVerify(`审核失败：${err.message}`); }
+    }
+    async function publishTemplate() {
+      try { const payload = await verifyRequest(`/api/v1/admin/templates/${encodeURIComponent($("admin-template-id").value)}/publish`, { method: "POST" }); logVerify(`模板发布完成：${payload.status}`); refreshPublic(); } catch (err) { logVerify(`发布失败：${err.message}`); }
+    }
+    $("request-code").addEventListener("click", requestCode);
+    $("verify-code-btn").addEventListener("click", verifyLogin);
+    $("logout-btn").addEventListener("click", logout);
+    $("check-permission").addEventListener("click", checkPermission);
+    $("refresh-public").addEventListener("click", refreshPublic);
+    $("import-template").addEventListener("click", importTemplate);
+    $("review-template").addEventListener("click", reviewTemplate);
+    $("publish-template").addEventListener("click", publishTemplate);
 
     function setStep(id, state) {
       const node = $(id);
