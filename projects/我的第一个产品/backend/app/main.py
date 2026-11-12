@@ -561,6 +561,8 @@ def create_app(
         model = session.scalar(model_query.order_by(ModelConfigRecord.priority))
         if model is None:
             raise AppError("MODEL_UNAVAILABLE", "当前没有可用的生图模型", 503)
+        if model.provider != settings.provider_mode:
+            raise AppError("MODEL_PROVIDER_UNAVAILABLE", "模型已保存，但当前运行环境未切换到对应供应商", 409)
         bindings = json.loads(model.module_bindings_json or "[]")
         if bindings and template.module_kind not in bindings:
             raise AppError("MODEL_MODULE_UNSUPPORTED", "该模型未绑定当前模块", 400)

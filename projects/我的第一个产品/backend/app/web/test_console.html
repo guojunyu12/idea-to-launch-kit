@@ -151,6 +151,16 @@
       </details>
       <details class="admin-flow">
         <summary>后台模型配置：保留其他模型，不进入普通用户列表</summary>
+        <p class="hint">添加规则：模型 ID 只允许字母、数字、点、下划线、冒号和短横线；供应商只能选 qwen、sensenova、mock 或 custom。保存模型不会自动开通对应供应商，当前环境仍需切换到匹配的 GEN_PROVIDER_MODE。</p>
+        <div class="admin-fields">
+          <input id="new-model-name" value="千问自定义模型" placeholder="模型名称">
+          <select id="new-model-provider"><option value="qwen">qwen</option><option value="sensenova">sensenova</option><option value="mock">mock</option><option value="custom">custom</option></select>
+          <input id="new-model-id" placeholder="例如 qwen-image-2.1-plus">
+          <input id="new-model-priority" value="100" type="number" min="0" placeholder="优先级">
+          <input id="new-model-points" value="1" type="number" min="0" placeholder="积分">
+          <input id="new-model-cost" value="0" type="number" min="0" placeholder="成本（分）">
+        </div>
+        <div class="verify-actions"><button class="secondary" id="add-model" type="button">管理员添加模型</button></div>
         <div class="verify-actions"><button class="secondary" id="refresh-model-config" type="button">查看模型配置</button></div>
         <div class="public-list" id="model-config-list">需要运营或管理员权限。</div>
         <div class="verify-actions">
@@ -276,6 +286,14 @@
         logVerify(`后台模型配置读取成功：${payload.items.length} 个（普通用户只看到已启用模型）。`);
       } catch (err) { logVerify(`后台模型配置读取失败：${err.message}`); }
     }
+    async function addModel() {
+      const modelId = $("new-model-id").value.trim();
+      if (!modelId) { logVerify("添加失败：请先填写模型 ID。"); return; }
+      try {
+        const payload = await verifyRequest("/api/v1/admin/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("new-model-name").value.trim(), provider: $("new-model-provider").value, model_id: modelId, enabled: false, is_default: false, priority: Number($("new-model-priority").value), module_bindings: ["sticker", "mobile_wallpaper", "desktop_wallpaper"], supported_ratios: ["1:1", "9:16", "16:9"], points_per_success: Number($("new-model-points").value), cost_cents_per_call: Number($("new-model-cost").value) }) });
+        logVerify(`模型配置已添加：${payload.model_id}（默认未启用）`); refreshModelConfig();
+      } catch (err) { logVerify(`添加模型失败：${err.message}`); }
+    }
     async function viewUsage() {
       try { const payload = await verifyRequest("/api/v1/admin/usage"); $("admin-summary").textContent = `用量：总计 ${payload.total}，成功 ${payload.succeeded}，失败 ${payload.failed}，已删除 ${payload.deleted}，成本 ${payload.cost_cents} 分\n按模型：${JSON.stringify(payload.by_model)}`; logVerify("用量摘要读取成功"); } catch (err) { logVerify(`用量摘要读取失败：${err.message}`); }
     }
@@ -322,6 +340,7 @@
     $("review-template").addEventListener("click", reviewTemplate);
     $("publish-template").addEventListener("click", publishTemplate);
     $("refresh-model-config").addEventListener("click", refreshModelConfig);
+    $("add-model").addEventListener("click", addModel);
     $("view-usage").addEventListener("click", viewUsage);
     $("view-audit").addEventListener("click", viewAudit);
     $("view-template-versions").addEventListener("click", viewTemplateVersions);

@@ -78,8 +78,8 @@ class ModelListOut(BaseModel):
 
 class ModelAdminCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    provider: str = Field(min_length=1, max_length=80)
-    model_id: str = Field(min_length=1, max_length=160)
+    provider: str = Field(pattern="^(qwen|sensenova|mock|custom)$")
+    model_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]+$", min_length=1, max_length=160)
     enabled: bool = True
     is_default: bool = False
     priority: int = Field(default=100, ge=0, le=10000)
