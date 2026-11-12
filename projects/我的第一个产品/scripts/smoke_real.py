@@ -21,7 +21,7 @@ MODEL = os.getenv("SENSENOVA_MODEL", "未配置")
 def v7_generation_smoke() -> None:
     started = datetime.now(timezone.utc).astimezone()
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    email = "stage2-2-smoke@example.com"
+    email = f"{STAGE.replace('-', '').replace('阶段', 'stage')}-smoke@example.com"
     with httpx.Client(base_url=BASE_URL, timeout=300) as client:
         health = client.get("/healthz")
         health.raise_for_status()
@@ -57,6 +57,11 @@ def v7_generation_smoke() -> None:
         output_path.write_bytes(asset.content)
         with Image.open(output_path) as image:
             width, height = image.size
+        if STAGE == "阶段2-3":
+            deleted = client.delete(f"/api/v1/generations/{payload['generation_id']}")
+            deleted.raise_for_status()
+            if deleted.json().get("status") != "deleted":
+                raise RuntimeError("生成结果删除状态不正确")
         other = httpx.Client(base_url=BASE_URL, timeout=30)
         try:
             other_challenge = other.post("/api/v1/auth/request-code", json={"email": "stage2-2-other@example.com"}).json()
@@ -67,7 +72,7 @@ def v7_generation_smoke() -> None:
         finally:
             other.close()
     provider = "阿里云百炼 DashScope" if model["provider"] == "qwen" else model["provider"]
-    record = f"""# 阶段2-2真实模型冒烟记录
+    record = f"""# {STAGE}真实模型冒烟记录
 
 - 模型：{model['model_id']}
 - 供应商：{provider}
@@ -78,6 +83,7 @@ def v7_generation_smoke() -> None:
 | {started.strftime('%Y-%m-%d %H:%M:%S')} | `/healthz` | 200，服务可用 |
 | {started_call.strftime('%Y-%m-%d %H:%M:%S')} | 真实生成 | 201，`status=succeeded`，模型 `{model['model_id']}`，耗时 `{payload.get('elapsed_ms')}` ms |
 | {started_call.strftime('%Y-%m-%d %H:%M:%S')} | 下载结果 | 200，PNG，{width}×{height}，{len(asset.content)} bytes |
+| {started_call.strftime('%Y-%m-%d %H:%M:%S')} | {'删除结果' if STAGE == '阶段2-3' else '结果保留'} | {'200，状态为 deleted' if STAGE == '阶段2-3' else '保留用于用户下载'} |
 | {started_call.strftime('%Y-%m-%d %H:%M:%S')} | 换用户读取 | 404，`NOT_FOUND` |
 
 任务 ID：`{payload['generation_id']}`
@@ -165,7 +171,7 @@ def main() -> None:
     if STAGE == "阶段2-1":
         foundation_smoke()
         return
-    if STAGE == "阶段2-2":
+    if STAGE in {"阶段2-2", "阶段2-3"}:
         v7_generation_smoke()
         return
     started = datetime.now(timezone.utc).astimezone()

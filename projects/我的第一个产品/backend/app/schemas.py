@@ -76,6 +76,50 @@ class ModelListOut(BaseModel):
     items: list[ModelOut]
 
 
+class ModelAdminCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider: str = Field(min_length=1, max_length=80)
+    model_id: str = Field(min_length=1, max_length=160)
+    enabled: bool = True
+    is_default: bool = False
+    priority: int = Field(default=100, ge=0, le=10000)
+    module_bindings: list[str] = []
+    supported_ratios: list[str] = []
+    points_per_success: int = Field(default=1, ge=0, le=100)
+    cost_cents_per_call: int = Field(default=0, ge=0, le=100000)
+
+
+class ModelAdminUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    is_default: bool | None = None
+    priority: int | None = Field(default=None, ge=0, le=10000)
+    module_bindings: list[str] | None = None
+    supported_ratios: list[str] | None = None
+    points_per_success: int | None = Field(default=None, ge=0, le=100)
+    cost_cents_per_call: int | None = Field(default=None, ge=0, le=100000)
+
+
+class UsageSummaryOut(BaseModel):
+    total: int
+    succeeded: int
+    failed: int
+    deleted: int
+    cost_cents: int
+    by_model: dict[str, int] = {}
+
+
+class TemplateVersionOut(BaseModel):
+    version_id: str
+    template_id: str
+    version_no: int
+    status: str
+    target_width: int
+    target_height: int
+    prompt_snapshot: str
+    created_at: str
+
+
 class GenerationCreateIn(BaseModel):
     template_id: str = Field(min_length=1, max_length=120)
     prompt: str = Field(default="", max_length=4096)

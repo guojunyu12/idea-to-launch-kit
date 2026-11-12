@@ -48,8 +48,12 @@ from app.schemas import (
     GenerationCreateIn,
     GenerationListOut,
     GenerationOut,
+    ModelAdminCreateIn,
+    ModelAdminUpdateIn,
     ModelListOut,
     ModelOut,
+    TemplateVersionOut,
+    UsageSummaryOut,
     RegenerateTaskIn,
     TaskOut,
     TemplateImportIn,
@@ -463,6 +467,83 @@ def create_app(
         rows = list(session.scalars(select(ModelConfigRecord).order_by(ModelConfigRecord.priority, ModelConfigRecord.created_at)))
         return {"items": [ModelOut.model_validate(_model_payload(row)) for row in rows]}
 
+    @app.post("/api/v1/admin/models", response_model=ModelOut, status_code=201)
+    def create_model_config(payload: ModelAdminCreateIn, user: UserRecord = Depends(require_admin), session: Session = Depends(db)):
+        if session.scalar(select(ModelConfigRecord).where(ModelConfigRecord.model_id == payload.model_id)) is not None:
+            raise AppError("MODEL_EXISTS", "模型 ID 已存在", 409)
+        now = _utcnow()
+        row = ModelConfigRecord(
+            name=payload.name,
+            provider=payload.provider,
+            model_id=payload.model_id,
+            enabled=payload.enabled,
+            is_default=payload.is_default,
+            priority=payload.priority,
+            module_bindings_json=json.dumps(payload.module_bindings),
+            supported_ratios_json=json.dumps(payload.supported_ratios),
+            points_per_success=payload.points_per_success,
+            cost_cents_per_call=payload.cost_cents_per_call,
+            created_at=now,
+            updated_at=now,
+        )
+        if payload.is_default:
+            for existing in session.scalars(select(ModelConfigRecord)):
+                existing.is_default = False
+        session.add(row)
+        session.add(AuditEvent(owner_id=user.id, actor_user_id=user.id, actor_role=user.role, entity_type="model", entity_id=payload.model_id, action="model_create", result="succeeded", metadata_json=json.dumps({"provider": payload.provider}, ensure_ascii=False)))
+        session.commit()
+        return ModelOut.model_validate(_model_payload(row))
+
+    @app.patch("/api/v1/admin/models/{model_id}", response_model=ModelOut)
+    def update_model_config(model_id: str, payload: ModelAdminUpdateIn, user: UserRecord = Depends(require_admin), session: Session = Depends(db)):
+        row = session.scalar(select(ModelConfigRecord).where(ModelConfigRecord.model_id == model_id))
+        if row is None:
+            raise AppError("MODEL_NOT_FOUND", "模型配置不存在", 404)
+        values = payload.model_dump(exclude_unset=True)
+        if "name" in values:
+            row.name = values["name"]
+        if "enabled" in values:
+            row.enabled = values["enabled"]
+        if "is_default" in values:
+            row.is_default = values["is_default"]
+            if values["is_default"]:
+                for existing in session.scalars(select(ModelConfigRecord)):
+                    existing.is_default = existing.model_id == model_id
+        if "priority" in values:
+            row.priority = values["priority"]
+        if "module_bindings" in values:
+            row.module_bindings_json = json.dumps(values["module_bindings"])
+        if "supported_ratios" in values:
+            row.supported_ratios_json = json.dumps(values["supported_ratios"])
+        if "points_per_success" in values:
+            row.points_per_success = values["points_per_success"]
+        if "cost_cents_per_call" in values:
+            row.cost_cents_per_call = values["cost_cents_per_call"]
+        row.updated_at = _utcnow()
+        session.add(AuditEvent(owner_id=user.id, actor_user_id=user.id, actor_role=user.role, entity_type="model", entity_id=model_id, action="model_update", result="succeeded", metadata_json=json.dumps({"fields": list(values)}, ensure_ascii=False)))
+        session.commit()
+        return ModelOut.model_validate(_model_payload(row))
+
+    @app.get("/api/v1/admin/templates/{template_id}/versions")
+    def template_versions(template_id: str, user: UserRecord = Depends(require_operator), session: Session = Depends(db)):
+        if session.get(TemplateRecord, template_id) is None:
+            raise AppError("TEMPLATE_NOT_FOUND", "模板不存在", 404)
+        rows = list(session.scalars(select(TemplateVersionRecord).where(TemplateVersionRecord.template_id == template_id).order_by(TemplateVersionRecord.version_no.desc())))
+        return {"items": [TemplateVersionOut(version_id=row.id, template_id=row.template_id, version_no=row.version_no, status=row.status, target_width=row.target_width, target_height=row.target_height, prompt_snapshot=row.prompt_snapshot, created_at=row.created_at.isoformat()) for row in rows]}
+
+    @app.get("/api/v1/admin/usage", response_model=UsageSummaryOut)
+    def usage_summary(user: UserRecord = Depends(require_operator), session: Session = Depends(db)):
+        rows = list(session.scalars(select(GenerationRecord)))
+        by_model: dict[str, int] = {}
+        for row in rows:
+            by_model[row.model_id] = by_model.get(row.model_id, 0) + 1
+        return {"total": len(rows), "succeeded": sum(row.status == "succeeded" for row in rows), "failed": sum(row.status == "failed" for row in rows), "deleted": sum(row.status == "deleted" for row in rows), "cost_cents": sum(row.cost_cents or 0 for row in rows), "by_model": by_model}
+
+    @app.get("/api/v1/admin/audit", response_model=AuditListOut)
+    def admin_audit(user: UserRecord = Depends(require_operator), session: Session = Depends(db)):
+        rows = list(session.scalars(select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(200)))
+        return {"items": [AuditOut(id=row.id, task_id=row.task_id, action=row.action, result=row.result, metadata=json.loads(row.metadata_json or "{}"), created_at=row.created_at.isoformat()) for row in rows]}
+
     @app.post("/api/v1/generations", response_model=GenerationOut, status_code=201)
     def create_generation(payload: GenerationCreateIn, user: UserRecord = Depends(current_user), session: Session = Depends(db)):
         if payload.idempotency_key:
@@ -556,6 +637,38 @@ def create_app(
         if row is None or row.status != "succeeded" or not row.asset_path or not Path(row.asset_path).is_file():
             raise AppError("NOT_FOUND", "生成结果不存在", 404)
         return FileResponse(row.asset_path, media_type="image/png", filename=f"{generation_id}.png")
+
+    @app.delete("/api/v1/generations/{generation_id}", response_model=GenerationOut)
+    def delete_generation(generation_id: str, user: UserRecord = Depends(current_user), session: Session = Depends(db)):
+        row = session.scalar(select(GenerationRecord).where(GenerationRecord.id == generation_id, GenerationRecord.user_id == user.id))
+        if row is None:
+            raise AppError("NOT_FOUND", "生成任务不存在", 404)
+        if row.status != "deleted":
+            if row.asset_path:
+                remove_file(row.asset_path)
+            row.status = "deleted"
+            row.deleted_at = _utcnow()
+            row.asset_path = None
+            row.updated_at = _utcnow()
+            session.add(AuditEvent(owner_id=user.id, actor_user_id=user.id, actor_role=user.role, entity_type="generation", entity_id=row.id, action="generation_delete", result="succeeded", metadata_json="{}"))
+            session.commit()
+        return _generation_payload(row)
+
+    @app.post("/api/v1/admin/cleanup")
+    def cleanup_expired(retention_days: int = Query(default=7, ge=1, le=3650), user: UserRecord = Depends(require_operator), session: Session = Depends(db)):
+        cutoff = _utcnow() - timedelta(days=retention_days)
+        rows = list(session.scalars(select(GenerationRecord).where(GenerationRecord.status == "succeeded", GenerationRecord.created_at < cutoff, GenerationRecord.asset_path.is_not(None))))
+        for row in rows:
+            if row.asset_path:
+                remove_file(row.asset_path)
+            row.asset_path = None
+            row.status = "expired"
+            row.deleted_at = _utcnow()
+            row.updated_at = _utcnow()
+        if rows:
+            session.add(AuditEvent(owner_id=user.id, actor_user_id=user.id, actor_role=user.role, entity_type="generation", action="generation_cleanup", result="succeeded", metadata_json=json.dumps({"count": len(rows), "retention_days": retention_days})))
+        session.commit()
+        return {"cleaned": len(rows), "retention_days": retention_days}
 
     @app.get("/api/v1/admin/templates")
     def admin_templates(user: UserRecord = Depends(require_operator), session: Session = Depends(db)):

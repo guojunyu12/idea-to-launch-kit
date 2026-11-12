@@ -49,6 +49,7 @@ class GenerationRecord(Base):
     free_quota_used: Mapped[bool] = mapped_column(default=False)
     charge_status: Mapped[str] = mapped_column(String(30), default="reserved")
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -243,6 +244,9 @@ def _migrate_sqlite(engine, database_url: str) -> None:
         user_columns = {column["name"] for column in inspect(engine).get_columns("users")}
         if "points_balance" not in user_columns:
             connection.exec_driver_sql("ALTER TABLE users ADD COLUMN points_balance INTEGER NOT NULL DEFAULT 0")
+        generation_columns = {column["name"] for column in inspect(engine).get_columns("generations")}
+        if "deleted_at" not in generation_columns:
+            connection.exec_driver_sql("ALTER TABLE generations ADD COLUMN deleted_at DATETIME")
         for name, definition in additions.items():
             if name not in existing:
                 connection.exec_driver_sql(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")

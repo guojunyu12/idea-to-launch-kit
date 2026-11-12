@@ -89,6 +89,23 @@ def test_v7_generation_idempotency_does_not_call_twice(client):
     assert len(client.get("/api/v1/generations").json()["items"]) == 1
 
 
+def test_v7_generation_delete_removes_asset(client):
+    login(client, "delete-v7@example.com")
+    created = client.post("/api/v1/generations", json={"template_id": "sticker-laugh", "prompt": "待删除", "idempotency_key": "delete-1"}).json()
+    deleted = client.delete(f"/api/v1/generations/{created['generation_id']}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+    assert deleted.json()["asset_url"] is None
+    assert client.get(f"/api/v1/generations/{created['generation_id']}/asset").status_code == 404
+
+
+def test_admin_model_config_is_role_protected(client):
+    login(client, "ordinary-model-user@example.com")
+    response = client.get("/api/v1/admin/models")
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "ROLE_FORBIDDEN"
+
+
 def test_upload_rejects_non_image_content_with_uniform_error(client):
     response = client.post(
         "/api/v1/uploads",
