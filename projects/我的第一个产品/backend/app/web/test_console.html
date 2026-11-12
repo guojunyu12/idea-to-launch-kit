@@ -149,6 +149,11 @@
           <button class="secondary" id="publish-template" type="button">发布模板</button>
         </div>
       </details>
+      <details class="admin-flow">
+        <summary>后台模型配置：保留其他模型，不进入普通用户列表</summary>
+        <div class="verify-actions"><button class="secondary" id="refresh-model-config" type="button">查看模型配置</button></div>
+        <div class="public-list" id="model-config-list">需要运营或管理员权限。</div>
+      </details>
       <pre class="verify-log" id="verify-log">点击上面的按钮开始验收。</pre>
       <div class="generation-flow">
         <div class="panel-title"><h2>V7 用户生成闭环</h2><span>模板 + 提示词 + 尺寸 + 模型</span></div>
@@ -258,6 +263,13 @@
     async function publishTemplate() {
       try { const payload = await verifyRequest(`/api/v1/admin/templates/${encodeURIComponent($("admin-template-id").value)}/publish`, { method: "POST" }); logVerify(`模板发布完成：${payload.status}`); refreshPublic(); } catch (err) { logVerify(`发布失败：${err.message}`); }
     }
+    async function refreshModelConfig() {
+      try {
+        const payload = await verifyRequest("/api/v1/admin/models");
+        $("model-config-list").textContent = payload.items.map((item) => `${item.name} · ${item.model_id} · ${item.enabled ? "已启用" : "配置保留/未启用"}${item.is_default ? " · 默认" : ""}`).join("\n") || "暂无模型配置";
+        logVerify(`后台模型配置读取成功：${payload.items.length} 个（普通用户只看到已启用模型）。`);
+      } catch (err) { logVerify(`后台模型配置读取失败：${err.message}`); }
+    }
     async function loadV7Options() {
       try {
         const [templates, models] = await Promise.all([verifyRequest("/api/v1/templates"), verifyRequest("/api/v1/models")]);
@@ -294,6 +306,7 @@
     $("import-template").addEventListener("click", importTemplate);
     $("review-template").addEventListener("click", reviewTemplate);
     $("publish-template").addEventListener("click", publishTemplate);
+    $("refresh-model-config").addEventListener("click", refreshModelConfig);
 
     function setStep(id, state) {
       const node = $(id);

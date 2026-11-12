@@ -212,6 +212,11 @@ def _seed_legacy_templates(session_factory, library_path: Path) -> None:
 def _seed_default_model(session_factory, settings: Settings) -> None:
     session = session_factory()
     try:
+        existing_rows = list(session.scalars(select(ModelConfigRecord)))
+        # Importing the module in tests uses the safe mock default. Never let
+        # that implicit default overwrite an already configured real provider.
+        if settings.provider_mode == "mock" and existing_rows:
+            return
         if settings.provider_mode == "qwen":
             model_id, name, provider = settings.qwen_model, "千问图片生成", "qwen"
         elif settings.provider_mode == "sensenova":
@@ -233,7 +238,7 @@ def _seed_default_model(session_factory, settings: Settings) -> None:
                 cost_cents_per_call=0,
             )
             session.add(row)
-        for existing in session.scalars(select(ModelConfigRecord)):
+        for existing in existing_rows:
             existing.is_default = existing.model_id == model_id
             if existing.model_id != model_id and existing.provider in {"mock", "qwen", "sensenova"}:
                 existing.enabled = False
@@ -451,6 +456,11 @@ def create_app(
         rows = list(session.scalars(select(ModelConfigRecord).where(ModelConfigRecord.enabled.is_(True)).order_by(ModelConfigRecord.priority, ModelConfigRecord.created_at)))
         if module:
             rows = [row for row in rows if not json.loads(row.module_bindings_json or "[]") or module in json.loads(row.module_bindings_json or "[]")]
+        return {"items": [ModelOut.model_validate(_model_payload(row)) for row in rows]}
+
+    @app.get("/api/v1/admin/models", response_model=ModelListOut)
+    def admin_models(user: UserRecord = Depends(require_operator), session: Session = Depends(db)):
+        rows = list(session.scalars(select(ModelConfigRecord).order_by(ModelConfigRecord.priority, ModelConfigRecord.created_at)))
         return {"items": [ModelOut.model_validate(_model_payload(row)) for row in rows]}
 
     @app.post("/api/v1/generations", response_model=GenerationOut, status_code=201)

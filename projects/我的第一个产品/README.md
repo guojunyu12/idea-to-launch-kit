@@ -16,7 +16,7 @@ cd projects/我的第一个产品/backend
 - 旧版兼容测试台：<http://127.0.0.1:8000/test>
 - V7 点击式验收台：<http://127.0.0.1:8000/test>
 
-当前真实模式使用阿里云百炼 DashScope 的 `qwen-image-2.1-turbo`，由本地 `.env` 的 `GEN_PROVIDER_MODE=qwen` 启动。真实 Key 只放在本地 `.env`，不要提交到 Git。
+当前本地测试模式使用商汤 `sensenova-u1.5-lite`，由本地 `.env` 的 `GEN_PROVIDER_MODE=sensenova` 启动。千问 `qwen-image-2.1-turbo` 等其他配置保留在后台模型配置中，但不会出现在普通用户可选列表。真实 Key 只放在本地 `.env`，不要提交到 Git。
 
 ## V7 登录与角色
 
@@ -47,6 +47,7 @@ cd projects/我的第一个产品/backend
 - `POST /api/v1/generations` 创建生成任务；需要登录 Cookie。
 - `GET /api/v1/generations` 查看自己的生成记录。
 - `GET /api/v1/generations/{id}/asset` 下载自己的 PNG 结果。
+- 运营/管理员可读 `GET /api/v1/admin/models` 查看全部模型配置；未启用模型只保留在后台配置，不对普通用户开放。
 - 每个用户每天 3 次免费生成；成功记录额度使用，失败记录返还状态。
 
 ## 验证
